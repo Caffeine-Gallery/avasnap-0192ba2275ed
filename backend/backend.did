@@ -1,0 +1,5 @@
+service : {
+  getAllAvatarIds: () -> (vec nat) query;
+  getAvatar: (nat) -> (opt blob) query;
+  uploadAvatar: (blob) -> (nat);
+}
