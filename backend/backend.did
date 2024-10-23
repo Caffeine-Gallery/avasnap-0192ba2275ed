@@ -1,5 +1,15 @@
+type Result_1 = 
+ variant {
+   err: text;
+   ok: blob;
+ };
+type Result = 
+ variant {
+   err: text;
+   ok: nat;
+ };
 service : {
   getAllAvatarIds: () -> (vec nat) query;
-  getAvatar: (nat) -> (opt blob) query;
-  uploadAvatar: (blob) -> (nat);
+  getAvatar: (nat) -> (Result_1) query;
+  uploadAvatar: (blob) -> (Result);
 }
