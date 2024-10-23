@@ -50,6 +50,11 @@ button:hover {
     background-color: #1557b0;
 }
 
+button:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
+
 .preview-section {
     display: flex;
     gap: 20px;
@@ -95,6 +100,11 @@ button:hover {
 .message.success {
     background-color: #e6ffed;
     color: #2c7a7b;
+}
+
+.message.info {
+    background-color: #ebf5ff;
+    color: #1a73e8;
 }
 
 @media (max-width: 768px) {
