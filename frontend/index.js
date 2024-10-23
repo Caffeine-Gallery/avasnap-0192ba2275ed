@@ -2,63 +2,101 @@ import { backend } from "declarations/backend";
 import { HttpAgent } from "@dfinity/agent";
 
 let currentPhotoBlob = null;
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif'];
-const TIMEOUT_DURATION = 120000; // 2 minutes in milliseconds
+const TIMEOUT_DURATION = 120000;
 
-// Configure agent with timeout
 const agent = new HttpAgent({
     host: process.env.DFX_NETWORK === "ic" ? "https://ic0.app" : "http://localhost:4943",
-    fetchOptions: {
-        timeout: TIMEOUT_DURATION,
-    },
+    fetchOptions: { timeout: TIMEOUT_DURATION }
 });
 
 document.getElementById('photoInput').addEventListener('change', handlePhotoSelect);
 document.getElementById('uploadBtn').addEventListener('click', handleUpload);
 
-async function compressImage(file) {
-    return new Promise((resolve) => {
+function cartoonizeImage(img) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    canvas.width = img.width;
+    canvas.height = img.height;
+    
+    // Draw original image
+    ctx.drawImage(img, 0, 0);
+    
+    // Apply edge detection
+    ctx.filter = 'blur(1px) contrast(150%)';
+    ctx.drawImage(canvas, 0, 0);
+    
+    // Apply color quantization effect
+    ctx.filter = 'saturate(150%) brightness(110%)';
+    ctx.drawImage(canvas, 0, 0);
+    
+    // Apply posterize effect
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    const levels = 5;
+    
+    for (let i = 0; i < data.length; i += 4) {
+        data[i] = Math.floor(data[i] / 255 * levels) / levels * 255;     // R
+        data[i + 1] = Math.floor(data[i + 1] / 255 * levels) / levels * 255; // G
+        data[i + 2] = Math.floor(data[i + 2] / 255 * levels) / levels * 255; // B
+    }
+    
+    ctx.putImageData(imageData, 0, 0);
+    
+    // Apply final smoothing
+    ctx.filter = 'brightness(105%) contrast(110%)';
+    ctx.drawImage(canvas, 0, 0);
+    
+    return canvas;
+}
+
+async function processImage(file) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
         const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = (e) => {
-            const img = new Image();
+        
+        reader.onload = function(e) {
             img.src = e.target.result;
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                let width = img.width;
-                let height = img.height;
-                
-                // Maximum dimensions
-                const MAX_WIDTH = 800;
-                const MAX_HEIGHT = 800;
-
-                if (width > height) {
-                    if (width > MAX_WIDTH) {
-                        height *= MAX_WIDTH / width;
-                        width = MAX_WIDTH;
+            img.onload = function() {
+                try {
+                    // Resize image if too large
+                    const MAX_DIMENSION = 800;
+                    let width = img.width;
+                    let height = img.height;
+                    
+                    if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+                        const ratio = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height);
+                        width *= ratio;
+                        height *= ratio;
                     }
-                } else {
-                    if (height > MAX_HEIGHT) {
-                        width *= MAX_HEIGHT / height;
-                        height = MAX_HEIGHT;
-                    }
+                    
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    
+                    // Create cartoon effect
+                    const cartoonCanvas = cartoonizeImage(canvas);
+                    
+                    cartoonCanvas.toBlob((blob) => {
+                        resolve(blob);
+                    }, 'image/png', 0.8);
+                } catch (error) {
+                    reject(error);
                 }
-
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, width, height);
-                
-                canvas.toBlob((blob) => {
-                    resolve(blob);
-                }, file.type, 0.7); // 0.7 quality for compression
             };
+            img.onerror = () => reject(new Error('Failed to load image'));
         };
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
     });
 }
 
-function handlePhotoSelect(event) {
+async function handlePhotoSelect(event) {
     const file = event.target.files[0];
     if (!file) return;
 
@@ -72,24 +110,27 @@ function handlePhotoSelect(event) {
         return;
     }
 
-    showMessage('Processing image...', 'info');
+    showMessage('Creating avatar...', 'info');
 
-    compressImage(file).then(compressedBlob => {
+    try {
+        // Display original image
         const reader = new FileReader();
-        reader.onload = function(e) {
+        reader.onload = (e) => {
             document.getElementById('originalPreview').src = e.target.result;
-            currentPhotoBlob = compressedBlob;
-            showMessage('Image ready for upload', 'success');
         };
-        reader.onerror = function(error) {
-            console.error('Error reading file:', error);
-            showMessage('Error processing image. Please try again.', 'error');
-        };
-        reader.readAsDataURL(compressedBlob);
-    }).catch(error => {
-        console.error('Error compressing image:', error);
-        showMessage('Error processing image. Please try again.', 'error');
-    });
+        reader.readAsDataURL(file);
+
+        // Process and display cartoon version
+        const cartoonBlob = await processImage(file);
+        currentPhotoBlob = cartoonBlob;
+        
+        const cartoonUrl = URL.createObjectURL(cartoonBlob);
+        document.getElementById('avatarPreview').src = cartoonUrl;
+        showMessage('Avatar ready! Click upload to save.', 'success');
+    } catch (error) {
+        console.error('Error processing image:', error);
+        showMessage('Error creating avatar. Please try again.', 'error');
+    }
 }
 
 async function handleUpload() {
@@ -100,12 +141,9 @@ async function handleUpload() {
 
     const uploadBtn = document.getElementById('uploadBtn');
     uploadBtn.disabled = true;
-    showMessage('Uploading to Internet Computer...', 'info');
+    showMessage('Saving avatar...', 'info');
 
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_DURATION);
-
         const arrayBuffer = await currentPhotoBlob.arrayBuffer();
         const uint8Array = new Uint8Array(arrayBuffer);
         
@@ -116,28 +154,9 @@ async function handleUpload() {
             )
         ]);
 
-        clearTimeout(timeoutId);
-
         switch (result.tag) {
             case 'ok': {
-                const avatarId = result._0;
-                showMessage('Retrieving avatar...', 'info');
-                
-                const avatarResult = await backend.getAvatar(avatarId);
-                
-                switch (avatarResult.tag) {
-                    case 'ok': {
-                        const avatarBlob = avatarResult._0;
-                        const blob = new Blob([avatarBlob], { type: currentPhotoBlob.type });
-                        const imageUrl = URL.createObjectURL(blob);
-                        document.getElementById('avatarPreview').src = imageUrl;
-                        showMessage('Avatar created successfully!', 'success');
-                        break;
-                    }
-                    case 'err': {
-                        throw new Error(avatarResult._0);
-                    }
-                }
+                showMessage('Avatar saved successfully!', 'success');
                 break;
             }
             case 'err': {
@@ -149,7 +168,7 @@ async function handleUpload() {
         if (error.name === 'AbortError' || error.message === 'Request timed out') {
             showMessage('Request timed out. Please try again with a smaller image.', 'error');
         } else {
-            showMessage(error.message || 'Error creating avatar. Please try again.', 'error');
+            showMessage(error.message || 'Error saving avatar. Please try again.', 'error');
         }
     } finally {
         uploadBtn.disabled = false;
